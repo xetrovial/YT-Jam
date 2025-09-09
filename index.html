@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Music Search</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #181818; color: #fff; margin: 0; padding: 0; }
+        .leftbar { position: fixed; top: 0; left: -340px; width: 340px; height: 100%; background: #232323; color: #fff; box-shadow: 2px 0 8px #000a; z-index: 1002; display: flex; flex-direction: column; align-items: center; padding: 30px 10px 20px 10px; transition: left 0.3s; }
+        .leftbar.open { left: 0; }
+        .leftbar h2 { margin-top: 0; font-size: 1.2em; }
+        #player { width: 100%; text-align: center; margin: 0; }
+        #ytplayer { width: 100% !important; }
+        #pausePlayBtn { margin-top: 10px; background: #444; color: #fff; border: none; border-radius: 5px; padding: 8px 18px; font-size: 1em; cursor: pointer; width: 90%; }
+        #leftbarToggle { position: fixed; top: 30px; left: 20px; z-index: 1003; background: #ff0000; color: #fff; border: none; border-radius: 0 5px 5px 0; padding: 10px 15px; cursor: pointer; }
+        .container { max-width: 600px; margin: 40px auto; background: #222; padding: 30px; border-radius: 10px; box-shadow: 0 2px 8px #000a; position: relative; margin-left: 370px; transition: margin-left 0.3s; }
+        .container.leftbar-collapsed { margin-left: 30px; }
+        h1 { text-align: center; }
+        input[type="text"] { width: 80%; padding: 10px; border-radius: 5px; border: none; margin-right: 10px; }
+        button { padding: 10px 20px; border: none; border-radius: 5px; background: #ff0000; color: #fff; cursor: pointer; }
+        .results { margin-top: 30px; }
+        .result { display: flex; align-items: center; margin-bottom: 15px; cursor: pointer; background: #333; border-radius: 5px; padding: 8px; transition: background 0.2s; }
+        .result:hover { background: #444; }
+        .thumb { width: 80px; height: 45px; margin-right: 15px; border-radius: 3px; }
+        .title { font-size: 1.1em; }
+        /* Playlist sidebar styles */
+        #sidebarToggle { position: fixed; top: 30px; right: 20px; z-index: 1001; background: #ff0000; color: #fff; border: none; border-radius: 5px 0 0 5px; padding: 10px 15px; cursor: pointer; }
+        #sidebar { position: fixed; top: 0; right: -320px; width: 300px; height: 100%; background: #222; color: #fff; box-shadow: -2px 0 8px #000a; transition: right 0.3s; z-index: 1000; overflow-y: auto; padding: 30px 20px 20px 20px; }
+        #sidebar.open { right: 0; }
+        #sidebar h2 { margin-top: 0; }
+        .playlist-item { display: flex; align-items: center; margin-bottom: 12px; background: #333; border-radius: 5px; padding: 6px; cursor: pointer; }
+        .playlist-item:hover { background: #444; }
+        .playlist-thumb { width: 50px; height: 28px; margin-right: 10px; border-radius: 3px; }
+        .playlist-title { font-size: 1em; }
+        @media (max-width: 900px) {
+            .leftbar, .leftbar.open { width: 100vw; left: 0; height: 260px; flex-direction: row; align-items: flex-start; padding: 10px; position: static; }
+            .container, .container.leftbar-collapsed { margin-left: 0; margin-top: 280px; }
+        }
+    </style>
+</head>
+<body>
+    <button id="leftbarToggle" onclick="toggleLeftbar()">Now Playing ▶</button>
+    <div class="leftbar" id="leftbar">
+        <h2>Now Playing</h2>
+        <div id="player"></div>
+        <button id="pausePlayBtn" onclick="pausePlay()" style="display:none;">Pause</button>
+    </div>
+    <button id="sidebarToggle" onclick="toggleSidebar()">Playlist ▶</button>
+    <div id="sidebar">
+        <h2>Playlist</h2>
+        <div id="playlist"></div>
+    </div>
+    <div class="container" id="mainContainer">
+        <h1>YouTube Music Search</h1>
+        <div>
+            <input type="text" id="searchInput" placeholder="Search for a song...">
+            <button onclick="searchYouTube()">Search</button>
+        </div>
+        <div class="results" id="results"></div>
+    </div>
+    <script>
+        // Collapsible leftbar logic
+        function toggleLeftbar() {
+            const leftbar = document.getElementById('leftbar');
+            const main = document.getElementById('mainContainer');
+            leftbar.classList.toggle('open');
+            if (leftbar.classList.contains('open')) {
+                document.getElementById('leftbarToggle').textContent = 'Now Playing ◀';
+                main.classList.remove('leftbar-collapsed');
+            } else {
+                document.getElementById('leftbarToggle').textContent = 'Now Playing ▶';
+                main.classList.add('leftbar-collapsed');
+            }
+        }
+        // Open leftbar by default
+        window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('leftbar').classList.add('open');
+            document.getElementById('leftbarToggle').textContent = 'Now Playing ◀';
+        });
+        const API_KEY = 'AIzaSyDQv-SWmAsTAFtkwyRH9VTCFMG1gtlaf2w';
+        let playlist = [];
+        let currentIndex = 0;
+        let player;
+        let playerReady = false;
+        let isPlaying = true;
+
+        async function searchYouTube() {
+            const query = document.getElementById('searchInput').value;
+            if (!query) return;
+            document.getElementById('results').innerHTML = 'Searching...';
+            try {
+                const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=20&q=${encodeURIComponent(query)}&key=${API_KEY}`);
+                if (!res.ok) {
+                    const errText = await res.text();
+                    document.getElementById('results').innerHTML = `API Error: ${res.status} - ${res.statusText}<br><pre>${errText}</pre>`;
+                    console.error('API Error:', res.status, res.statusText, errText);
+                    return;
+                }
+                const data = await res.json();
+                if (!data.items) {
+                    document.getElementById('results').innerHTML = 'No results found.';
+                    console.warn('No items in API response:', data);
+                    return;
+                }
+                document.getElementById('results').innerHTML = data.items.map(item => {
+                    const snippet = item.snippet;
+                    return `
+                        <div class="result" onclick="addToPlaylist('${item.id.videoId}', '${encodeURIComponent(snippet.title)}', '${encodeURIComponent(snippet.thumbnails.default.url)}')">
+                            <img class="thumb" src="${snippet.thumbnails.default.url}" alt="Thumbnail">
+                            <div>
+                                <div class="title">${snippet.title}</div>
+                                <div style='font-size:0.95em;color:#aaa;'>${snippet.channelTitle} &bull; ${new Date(snippet.publishedAt).toLocaleDateString()}</div>
+                                <div style='font-size:0.95em;color:#bbb;margin-top:2px;'>${snippet.description ? snippet.description.substring(0, 80) + (snippet.description.length > 80 ? '...' : '') : ''}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                document.getElementById('results').innerHTML = 'Network or JavaScript error. See console for details.';
+                console.error('Fetch/JS Error:', err);
+            }
+        }
+
+        function addToPlaylist(videoId, title, thumbUrl) {
+            // Add to playlist (even if duplicate)
+            playlist.push({
+                videoId,
+                title: decodeURIComponent(title),
+                thumb: decodeURIComponent(thumbUrl)
+            });
+            currentIndex = playlist.length - 1;
+            renderPlaylist();
+            playCurrent();
+        }
+
+        function renderPlaylist() {
+            const pl = document.getElementById('playlist');
+            if (!playlist.length) {
+                pl.innerHTML = '<div style="color:#aaa;">No songs selected.</div>';
+                return;
+            }
+            pl.innerHTML = playlist.map((item, i) => `
+                <div class="playlist-item" onclick="playFromPlaylist(${i})">
+                    <img class="playlist-thumb" src="${item.thumb}" alt="Thumb">
+                    <div class="playlist-title">${item.title}</div>
+                </div>
+            `).join('');
+        }
+
+        function playFromPlaylist(idx) {
+            currentIndex = idx;
+            playCurrent();
+        }
+
+        function playCurrent() {
+            if (!playlist.length) return;
+            const videoId = playlist[currentIndex].videoId;
+            // If player exists, load new video, else create
+            if (player && playerReady) {
+                player.loadVideoById(videoId);
+            } else {
+                document.getElementById('player').innerHTML = `<div id="ytplayer"></div>`;
+                loadYouTubePlayer(videoId);
+            }
+            document.getElementById('pausePlayBtn').style.display = '';
+            isPlaying = true;
+            updatePausePlayBtn();
+        }
+
+        function loadYouTubePlayer(videoId) {
+            if (window.YT && window.YT.Player) {
+                player = new YT.Player('ytplayer', {
+                    height: '315',
+                    width: '100%',
+                    videoId: videoId,
+                    events: {
+                        'onReady': function(e) { playerReady = true; },
+                        'onStateChange': onPlayerStateChange
+                    },
+                    playerVars: { 'autoplay': 1, 'controls': 1 }
+                });
+            } else {
+                // Load YouTube IFrame API
+                var tag = document.createElement('script');
+                tag.src = "https://www.youtube.com/iframe_api";
+                document.body.appendChild(tag);
+                window.onYouTubeIframeAPIReady = function() {
+                    player = new YT.Player('ytplayer', {
+                        height: '315',
+                        width: '100%',
+                        videoId: videoId,
+                        events: {
+                            'onReady': function(e) { playerReady = true; },
+                            'onStateChange': onPlayerStateChange
+                        },
+                        playerVars: { 'autoplay': 1, 'controls': 1 }
+                    });
+                }
+            }
+        }
+
+        function pausePlay() {
+            if (!player || !playerReady) return;
+            if (isPlaying) {
+                player.pauseVideo();
+                isPlaying = false;
+            } else {
+                player.playVideo();
+                isPlaying = true;
+            }
+            updatePausePlayBtn();
+        }
+
+        function updatePausePlayBtn() {
+            document.getElementById('pausePlayBtn').textContent = isPlaying ? 'Pause' : 'Play';
+        }
+
+        function onPlayerStateChange(event) {
+            // 0 = ended, 1 = playing, 2 = paused
+            if (event.data === 1) isPlaying = true;
+            if (event.data === 2) isPlaying = false;
+            updatePausePlayBtn();
+        }
+
+        // Sidebar logic
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('open');
+            document.getElementById('sidebarToggle').textContent = sidebar.classList.contains('open') ? 'Playlist ◀' : 'Playlist ▶';
+        }
+
+        // Initial render
+        renderPlaylist();
+    </script>
+</body>
+</html>
